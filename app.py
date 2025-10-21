@@ -8,47 +8,70 @@ import time
 
 class VideoPlayerApp:
     def __init__(self, root):
+        """
+        Initialize the Video Player Application
+        
+        Args:
+            root: The main Tkinter window instance
+        """
         self.root = root
-        self.root.title("Reproductor de Videos - Servidor Local")
+        self.root.title("Video Player - Local Server")
         self.root.geometry("900x600")
         
-        # Configuración del servidor SMB
+        # SMB server configuration
+        # Read server IP and share name from environment variables
         self.server_ip = os.getenv("SERVER_IP")
         self.share_name = os.getenv("SHARE_NAME")
         self.smb_uri = f"smb://{self.server_ip}/{self.share_name}"
         
-        # Intentar obtener la ruta GVFS
+        # Attempt to get the GVFS path (Linux virtual filesystem for network shares)
         self.smb_path = self.get_gvfs_path()
         self.current_path = self.smb_path
         
-        # Extensiones de video soportadas
+        # Supported video file extensions
         self.video_extensions = {'.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v'}
         
+        # Setup the user interface
         self.setup_ui()
         
-        # Conectar al servidor e iniciar
+        # Connect to server and start after 100ms
         self.root.after(100, self.initialize_connection)
     
     def get_gvfs_path(self):
-        """Busca la ruta GVFS del servidor SMB"""
+        """
+        Search for the GVFS path of the SMB server
+        GVFS (GNOME Virtual File System) is used by Linux to mount network shares
+        
+        Returns:
+            str: The GVFS mount path for the SMB share
+        """
         try:
+            # Get user ID for constructing GVFS path
             uid = os.getuid()
             gvfs_base = f"/run/user/{uid}/gvfs"
             
+            # Check if GVFS base directory exists
             if os.path.exists(gvfs_base):
+                # Look through mounted shares for matching server and share name
                 for mount in os.listdir(gvfs_base):
                     if f"server={self.server_ip}" in mount and f"share={self.share_name}" in mount:
                         return os.path.join(gvfs_base, mount)
             
-            # Si no existe, devolver la ruta esperada
+            # If not found, return the expected path format
             return f"/run/user/{uid}/gvfs/smb-share:server={self.server_ip},share={self.share_name}"
         except:
+            # Fallback to default user ID 1000 if there's an error
             return f"/run/user/1000/gvfs/smb-share:server={self.server_ip},share={self.share_name}"
     
     def connect_to_server(self):
-        """Conecta automáticamente al servidor SMB usando gio"""
+        """
+        Automatically connect to the SMB server using gio mount command
+        
+        Returns:
+            bool: True if connection was successful, False otherwise
+        """
         try:
-            # Usar gio mount para montar el recurso SMB
+            # Use gio mount to mount the SMB resource
             result = subprocess.run(
                 ['gio', 'mount', self.smb_uri],
                 capture_output=True,
@@ -56,40 +79,46 @@ class VideoPlayerApp:
                 timeout=10
             )
             
-            # Esperar un momento para que se monte
+            # Wait a moment for the mount to complete
             time.sleep(1)
             
-            # Actualizar la ruta GVFS
+            # Update the GVFS path after mounting
             self.smb_path = self.get_gvfs_path()
             self.current_path = self.smb_path
             
             return True
             
         except subprocess.TimeoutExpired:
+            # Connection timed out
             return False
         except FileNotFoundError:
+            # gio command not found on the system
             messagebox.showwarning(
-                "Herramienta no disponible",
-                "No se pudo usar 'gio' para montar automáticamente.\n"
-                "Por favor, conecta manualmente al servidor desde el explorador de archivos."
+                "Tool Not Available",
+                "Could not use 'gio' to mount automatically.\n"
+                "Please connect manually to the server from the file manager."
             )
             return False
         except Exception as e:
+            # Generic error handling
             return False
     
     def initialize_connection(self):
-        """Inicializa la conexión y carga el directorio"""
-        # Verificar si ya está montado
+        """
+        Initialize the connection and load the directory
+        First checks if already mounted, then attempts automatic connection
+        """
+        # Check if the share is already mounted and accessible
         if os.path.exists(self.smb_path):
             try:
-                os.listdir(self.smb_path)  # Test de acceso
+                os.listdir(self.smb_path)  # Test access to the directory
                 self.load_directory(self.smb_path)
                 return
             except:
                 pass
         
-        # Intentar conectar automáticamente
-        self.info_label.config(text="🔄 Conectando al servidor...")
+        # Attempt automatic connection
+        self.info_label.config(text="🔄 Connecting to server...")
         self.root.update()
         
         if self.connect_to_server():
@@ -101,103 +130,125 @@ class VideoPlayerApp:
             self.show_connection_error()
     
     def show_connection_error(self):
-        """Muestra diálogo de error de conexión con instrucciones"""
+        """
+        Display connection error dialog with manual connection instructions
+        """
         msg = (
-            f"No se pudo conectar automáticamente al servidor.\n\n"
-            f"Por favor, conecta manualmente:\n"
-            f"1. Abre el explorador de archivos\n"
-            f"2. Presiona Ctrl+L y escribe: {self.smb_uri}\n"
-            f"3. Ingresa tus credenciales si es necesario\n"
-            f"4. Vuelve a abrir esta aplicación\n\n"
-            f"O configura el montaje automático (ver README)"
+            f"Could not automatically connect to the server.\n\n"
+            f"Please connect manually:\n"
+            f"1. Open the file manager\n"
+            f"2. Press Ctrl+L and type: {self.smb_uri}\n"
+            f"3. Enter your credentials if prompted\n"
+            f"4. Reopen this application\n\n"
+            f"Or configure automatic mounting (see README)"
         )
         
-        response = messagebox.askretrycancel("Error de conexión", msg)
+        response = messagebox.askretrycancel("Connection Error", msg)
         
         if response:
-            # Reintentar
+            # Retry connection
             self.initialize_connection()
         else:
+            # Close application
             self.root.destroy()
     
     def setup_ui(self):
-        # Frame superior para la ruta actual
+        """
+        Setup the user interface components
+        Creates the layout with path display, navigation buttons, file tree, and status bar
+        """
+        # Top frame for current path display
         top_frame = ttk.Frame(self.root, padding="10")
         top_frame.pack(fill=tk.X)
         
-        ttk.Label(top_frame, text="Ruta actual:", font=('Arial', 10, 'bold')).pack(side=tk.LEFT)
+        ttk.Label(top_frame, text="Current path:", font=('Arial', 10, 'bold')).pack(side=tk.LEFT)
         
+        # Label to display current directory path
         self.path_label = ttk.Label(top_frame, text="", font=('Arial', 9))
         self.path_label.pack(side=tk.LEFT, padx=10, fill=tk.X, expand=True)
         
-        # Botón para reconectar
-        ttk.Button(top_frame, text="🔄 Reconectar", command=self.reconnect).pack(side=tk.RIGHT, padx=5)
+        # Reconnect button
+        ttk.Button(top_frame, text="🔄 Reconnect", command=self.reconnect).pack(side=tk.RIGHT, padx=5)
         
-        # Botón para volver atrás
-        self.back_btn = ttk.Button(top_frame, text="← Atrás", command=self.go_back)
+        # Back button to navigate to parent directory
+        self.back_btn = ttk.Button(top_frame, text="← Back", command=self.go_back)
         self.back_btn.pack(side=tk.RIGHT, padx=5)
         
-        # Botón para ir al inicio
-        ttk.Button(top_frame, text="🏠 Inicio", command=self.go_home).pack(side=tk.RIGHT)
+        # Home button to return to root directory
+        ttk.Button(top_frame, text="🏠 Home", command=self.go_home).pack(side=tk.RIGHT)
         
-        # Frame para el listado de archivos
+        # Frame for file listing
         list_frame = ttk.Frame(self.root, padding="10")
         list_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Scrollbar
+        # Scrollbar for the file tree
         scrollbar = ttk.Scrollbar(list_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        # Treeview para mostrar carpetas y archivos
+        # Treeview widget to display folders and files
         self.tree = ttk.Treeview(list_frame, yscrollcommand=scrollbar.set, selectmode='browse')
         self.tree.pack(fill=tk.BOTH, expand=True)
         scrollbar.config(command=self.tree.yview)
         
-        # Configurar columnas
+        # Configure columns for the tree view
         self.tree['columns'] = ('tipo', 'tamaño')
         self.tree.column('#0', width=500, minwidth=200)
         self.tree.column('tipo', width=100, minwidth=80)
         self.tree.column('tamaño', width=100, minwidth=80)
         
-        self.tree.heading('#0', text='Nombre', anchor=tk.W)
-        self.tree.heading('tipo', text='Tipo', anchor=tk.W)
-        self.tree.heading('tamaño', text='Tamaño', anchor=tk.W)
+        # Set column headings
+        self.tree.heading('#0', text='Name', anchor=tk.W)
+        self.tree.heading('tipo', text='Type', anchor=tk.W)
+        self.tree.heading('tamaño', text='Size', anchor=tk.W)
         
-        # Eventos
+        # Bind double-click event to tree items
         self.tree.bind('<Double-Button-1>', self.on_double_click)
         
-        # Frame inferior para información
+        # Bottom frame for status information
         info_frame = ttk.Frame(self.root, padding="10")
         info_frame.pack(fill=tk.X)
         
-        self.info_label = ttk.Label(info_frame, text="Iniciando...", 
+        # Status label to show current operation or statistics
+        self.info_label = ttk.Label(info_frame, text="Starting...", 
                                    font=('Arial', 9))
         self.info_label.pack()
     
     def reconnect(self):
-        """Fuerza una reconexión al servidor"""
+        """
+        Force a reconnection to the server
+        Called when user clicks the Reconnect button
+        """
         self.initialize_connection()
     
     def load_directory(self, path):
-        """Carga el contenido de un directorio"""
+        """
+        Load and display the contents of a directory
+        
+        Args:
+            path: Full path to the directory to load
+        """
+        # Clear existing items from tree
         self.tree.delete(*self.tree.get_children())
         self.current_path = path
         
-        # Mostrar ruta más amigable
-        display_path = path.replace(self.smb_path, "Servidor")
+        # Create a more user-friendly display path
+        display_path = path.replace(self.smb_path, "Server")
         if display_path == path:
-            display_path = f"Servidor/{os.path.basename(path)}"
+            display_path = f"Server/{os.path.basename(path)}"
         
         self.path_label.config(text=display_path)
         
         try:
+            # Get list of items in directory
             items = os.listdir(path)
             items.sort()
             
             folders = []
             videos = []
             
+            # Separate folders and video files
             for item in items:
+                # Skip hidden and system files (starting with @ or .)
                 if item.startswith('@') or item.startswith('.'):
                     continue
                 
@@ -210,31 +261,41 @@ class VideoPlayerApp:
                     if ext in self.video_extensions:
                         videos.append(item)
             
-            # Insertar carpetas primero
+            # Insert folders first (with folder icon emoji)
             for folder in folders:
-                self.tree.insert('', tk.END, text=f"📁 {folder}", values=('Carpeta', ''), tags=('folder',))
+                self.tree.insert('', tk.END, text=f"📁 {folder}", values=('Folder', ''), tags=('folder',))
             
-            # Insertar videos
+            # Insert videos (with film icon emoji)
             for video in videos:
                 full_path = os.path.join(path, video)
                 size = self.get_file_size(full_path)
-                ext = os.path.splitext(video)[1].upper()[1:]
+                ext = os.path.splitext(video)[1].upper()[1:]  # Get extension without dot
                 self.tree.insert('', tk.END, text=f"🎬 {video}", values=(f'Video {ext}', size), tags=('video',))
             
-            self.info_label.config(text=f"📁 {len(folders)} carpetas | 🎬 {len(videos)} videos")
+            # Update status label with count of items
+            self.info_label.config(text=f"📁 {len(folders)} folders | 🎬 {len(videos)} videos")
             
         except PermissionError:
-            messagebox.showerror("Error", "No tienes permisos para acceder a esta carpeta")
+            messagebox.showerror("Error", "You don't have permission to access this folder")
         except FileNotFoundError:
-            messagebox.showerror("Error", "No se encontró el directorio. ¿Se desconectó el servidor?")
+            messagebox.showerror("Error", "Directory not found. Did the server disconnect?")
             self.show_connection_error()
         except Exception as e:
-            messagebox.showerror("Error", f"Error al cargar el directorio: {str(e)}")
+            messagebox.showerror("Error", f"Error loading directory: {str(e)}")
     
     def get_file_size(self, filepath):
-        """Obtiene el tamaño del archivo en formato legible"""
+        """
+        Get file size in human-readable format
+        
+        Args:
+            filepath: Full path to the file
+            
+        Returns:
+            str: Formatted file size (e.g., "1.5 GB")
+        """
         try:
             size = os.path.getsize(filepath)
+            # Convert to appropriate unit
             for unit in ['B', 'KB', 'MB', 'GB']:
                 if size < 1024.0:
                     return f"{size:.1f} {unit}"
@@ -244,71 +305,99 @@ class VideoPlayerApp:
             return "N/A"
     
     def on_double_click(self, event):
-        """Maneja el doble clic en un elemento"""
+        """
+        Handle double-click events on tree items
+        Opens folders or plays videos depending on item type
+        
+        Args:
+            event: The click event object
+        """
         selection = self.tree.selection()
         if not selection:
             return
         
+        # Get item data
         item = self.tree.item(selection[0])
         name = item['text'].replace('📁 ', '').replace('🎬 ', '')
         tipo = item['values'][0]
         
         full_path = os.path.join(self.current_path, name)
         
-        if tipo == 'Carpeta':
+        # Navigate into folder or play video
+        if tipo == 'Folder':
             self.load_directory(full_path)
         elif 'Video' in tipo:
             self.play_video(full_path)
     
     def play_video(self, video_path):
-        """Reproduce un video usando el reproductor predeterminado del sistema"""
+        """
+        Play a video using the system's default video player
+        Tries multiple players on Linux for better compatibility
+        
+        Args:
+            video_path: Full path to the video file
+        """
         try:
             system = platform.system()
             
             if system == 'Linux':
-                # Intentar con varios reproductores comunes en Linux
-                # MPV primero porque es más estable y ligero
+                # Try various common Linux video players
+                # MPV is tried first because it's more stable and lightweight
                 players = ['mpv', 'totem', 'gnome-videos', 'xdg-open', '/usr/bin/vlc']
                 for player in players:
                     try:
-                        # Usar DEVNULL para evitar output en terminal
+                        # Use DEVNULL to avoid terminal output
                         subprocess.Popen([player, video_path], 
                                        stdout=subprocess.DEVNULL, 
                                        stderr=subprocess.DEVNULL)
-                        self.info_label.config(text=f"▶️ Reproduciendo: {os.path.basename(video_path)}")
+                        self.info_label.config(text=f"▶️ Playing: {os.path.basename(video_path)}")
                         return
                     except FileNotFoundError:
+                        # Try next player if this one isn't found
                         continue
-                messagebox.showerror("Error", "No se encontró ningún reproductor de video. Instala MPV con: sudo apt install mpv")
+                # If no player was found, show error
+                messagebox.showerror("Error", "No video player found. Install MPV with: sudo apt install mpv")
             
             elif system == 'Windows':
+                # Use Windows default file handler
                 os.startfile(video_path)
-                self.info_label.config(text=f"▶️ Reproduciendo: {os.path.basename(video_path)}")
+                self.info_label.config(text=f"▶️ Playing: {os.path.basename(video_path)}")
             
             elif system == 'Darwin':  # macOS
+                # Use macOS 'open' command
                 subprocess.Popen(['open', video_path])
-                self.info_label.config(text=f"▶️ Reproduciendo: {os.path.basename(video_path)}")
+                self.info_label.config(text=f"▶️ Playing: {os.path.basename(video_path)}")
                 
         except Exception as e:
-            messagebox.showerror("Error", f"Error al reproducir el video: {str(e)}")
+            messagebox.showerror("Error", f"Error playing video: {str(e)}")
     
     def go_back(self):
-        """Vuelve al directorio anterior"""
+        """
+        Navigate to the parent directory
+        Only works if not already at the root server directory
+        """
         if self.current_path != self.smb_path:
             parent_path = os.path.dirname(self.current_path)
             self.load_directory(parent_path)
     
     def go_home(self):
-        """Vuelve al directorio raíz del servidor"""
+        """
+        Navigate back to the server root directory
+        """
         self.load_directory(self.smb_path)
 
 def main():
-    if os.environ.get("DISPLAY") or os.name == "nt":  # Si hay entorno gráfico (Linux con X11 o Windows)
+    """
+    Main entry point for the application
+    Checks for graphical environment before launching GUI
+    """
+    # Check if there's a graphical environment (Linux with X11 or Windows)
+    if os.environ.get("DISPLAY") or os.name == "nt":
         root = tk.Tk()
         app = VideoPlayerApp(root)
         root.mainloop()
     else:
-        print("🔸 Entorno sin interfaz gráfica, ejecutando en modo consola.")
+        print("🔸 No graphical environment detected, running in console mode.")
         return
 
 if __name__ == "__main__":
