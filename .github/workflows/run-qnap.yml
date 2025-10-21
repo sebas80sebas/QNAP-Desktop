@@ -4,7 +4,9 @@ on:
   workflow_dispatch:  
   push:
     branches:
-      - main           
+      - main 
+  pull_request:
+    branches: [ main ]
 
 jobs:
   run-app:
@@ -26,9 +28,9 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-tk gvfs-bin
+          sudo apt-get install -y python3-tk mpv
           pip install --upgrade pip
-
+      
       - name: Run Video Player App
         run: |
           python3 app.py
