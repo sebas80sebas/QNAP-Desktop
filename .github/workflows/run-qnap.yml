@@ -1,0 +1,34 @@
+name: Run QNAP Desktop App
+
+on:
+  workflow_dispatch:  
+  push:
+    branches:
+      - main           
+
+jobs:
+  run-app:
+    runs-on: ubuntu-latest
+
+    env:
+      SERVER_IP: ${{ secrets.SERVER_IP }}
+      SHARE_NAME: ${{ secrets.SHARE_NAME }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk gvfs-bin
+          pip install --upgrade pip
+
+      - name: Run Video Player App
+        run: |
+          python3 app.py
