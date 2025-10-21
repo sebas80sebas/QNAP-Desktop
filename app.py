@@ -14,7 +14,7 @@ class VideoPlayerApp:
         
         # Configuración del servidor SMB
         self.server_ip = os.getenv("SERVER_IP", "192.XXX.X.XXX")
-	self.share_name = os.getenv("SHARE_NAME", "public")
+	    self.share_name = os.getenv("SHARE_NAME", "public")
         self.smb_uri = f"smb://{self.server_ip}/{self.share_name}"
         
         # Intentar obtener la ruta GVFS
