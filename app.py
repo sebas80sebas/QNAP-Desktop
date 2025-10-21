@@ -303,9 +303,13 @@ class VideoPlayerApp:
         self.load_directory(self.smb_path)
 
 def main():
-    root = tk.Tk()
-    app = VideoPlayerApp(root)
-    root.mainloop()
+    if os.environ.get("DISPLAY") or os.name == "nt":  # Si hay entorno gráfico (Linux con X11 o Windows)
+        root = tk.Tk()
+        app = VideoPlayerApp(root)
+        root.mainloop()
+    else:
+        print("🔸 Entorno sin interfaz gráfica, ejecutando en modo consola.")
+        return
 
 if __name__ == "__main__":
     main()
