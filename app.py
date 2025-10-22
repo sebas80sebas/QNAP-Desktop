@@ -247,7 +247,8 @@ class VideoPlayerApp:
             
             folders = []
             videos = []
-            
+            documents = []
+
             # Separate folders and video files
             for item in items:
                 # Skip hidden and system files (starting with @ or .)
@@ -262,6 +263,8 @@ class VideoPlayerApp:
                     ext = os.path.splitext(item)[1].lower()
                     if ext in self.video_extensions:
                         videos.append(item)
+                    elif ext in self.document_extensions:
+                        documents.append(item)
             
             # Insert folders first (with folder icon emoji)
             for folder in folders:
@@ -274,9 +277,16 @@ class VideoPlayerApp:
                 ext = os.path.splitext(video)[1].upper()[1:]  # Get extension without dot
                 self.tree.insert('', tk.END, text=f"🎬 {video}", values=(f'Video {ext}', size), tags=('video',))
             
+            # Insertar documentos
+            for doc in documents:
+                full_path = os.path.join(path, doc)
+                size = self.get_file_size(full_path)
+                ext = os.path.splitext(doc)[1].upper()[1:]
+                self.tree.insert('', tk.END, text=f"📄 {doc}", values=(f'Documento {ext}', size), tags=('document',))
+
             # Update status label with count of items
-            self.info_label.config(text=f"📁 {len(folders)} folders | 🎬 {len(videos)} videos")
-            
+            self.info_label.config(text=f"📁 {len(folders)} folders | 🎬 {len(videos)} videos | 📄 {len(documents)} documentos")
+
         except PermissionError:
             messagebox.showerror("Error", "You don't have permission to access this folder")
         except FileNotFoundError:
