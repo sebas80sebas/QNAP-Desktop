@@ -4,6 +4,7 @@ import os
 import subprocess
 import platform
 from pathlib import Path
+from PIL import Image, ImageTk
 import time
 
 class VideoPlayerApp:
@@ -30,7 +31,8 @@ class VideoPlayerApp:
         
         # Supported video file extensions
         self.video_extensions = {'.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v'}
-        
+        self.document_extensions = {'.pdf'}
+
         # Setup the user interface
         self.setup_ui()
         
@@ -318,7 +320,7 @@ class VideoPlayerApp:
         
         # Get item data
         item = self.tree.item(selection[0])
-        name = item['text'].replace('📁 ', '').replace('🎬 ', '')
+        name = item['text'].replace('📁 ', '').replace('🎬 ', '').replace('📄 ', '')
         tipo = item['values'][0]
         
         full_path = os.path.join(self.current_path, name)
@@ -328,7 +330,20 @@ class VideoPlayerApp:
             self.load_directory(full_path)
         elif 'Video' in tipo:
             self.play_video(full_path)
+        elif 'Documento' in tipo:
+            self.open_document(full_path)
     
+    def open_document(self, doc_path):
+        """Abre un documento con visor integrado o externo"""
+        ext = os.path.splitext(doc_path)[1].lower()
+        
+        if ext == '.pdf':
+            # Para PDF, usar visor del navegador como fallback integrado
+            self.open_pdf_viewer(doc_path)
+        else:
+            # Otros documentos, abrir con aplicación externa
+            self.open_external(doc_path, "documento")
+
     def play_video(self, video_path):
         """
         Play a video using the system's default video player
@@ -371,6 +386,167 @@ class VideoPlayerApp:
         except Exception as e:
             messagebox.showerror("Error", f"Error playing video: {str(e)}")
     
+    def open_pdf_viewer(self, pdf_path):
+        """Visor integrado para archivos PDF"""
+        viewer = tk.Toplevel(self.root)
+        viewer.title(f"📄 {os.path.basename(pdf_path)}")
+        viewer.geometry("900x700")
+        
+        try:
+            import fitz  # PyMuPDF
+            
+            # Frame para controles
+            control_frame = ttk.Frame(viewer)
+            control_frame.pack(fill=tk.X, padx=10, pady=5)
+            
+            # Variables
+            current_page = tk.IntVar(value=1)
+            zoom_level = tk.DoubleVar(value=1.0)
+            
+            # Abrir PDF
+            pdf_doc = fitz.open(pdf_path)
+            total_pages = pdf_doc.page_count
+            
+            # Canvas para mostrar la página
+            canvas_frame = ttk.Frame(viewer)
+            canvas_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+            
+            canvas = tk.Canvas(canvas_frame, bg='#2b2b2b')
+            scrollbar_y = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL, command=canvas.yview)
+            scrollbar_x = ttk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL, command=canvas.xview)
+            
+            canvas.configure(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
+            
+            scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
+            scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
+            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            
+            def render_page():
+                """Renderiza la página actual con el zoom actual"""
+                page = pdf_doc[current_page.get() - 1]
+                
+                # Aplicar zoom
+                zoom = zoom_level.get()
+                mat = fitz.Matrix(zoom, zoom)
+                pix = page.get_pixmap(matrix=mat)
+                
+                # Convertir a formato PIL
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                
+                # Convertir a PhotoImage
+                photo = ImageTk.PhotoImage(img)
+                
+                # Limpiar canvas
+                canvas.delete("all")
+                
+                # Mostrar imagen
+                canvas.create_image(0, 0, anchor=tk.NW, image=photo)
+                canvas.image = photo  # Mantener referencia
+                
+                # Configurar región de scroll
+                canvas.configure(scrollregion=canvas.bbox("all"))
+                
+                # Actualizar etiqueta
+                page_label.config(text=f"Página {current_page.get()} de {total_pages}")
+                zoom_label.config(text=f"Zoom: {int(zoom * 100)}%")
+            
+            def prev_page():
+                if current_page.get() > 1:
+                    current_page.set(current_page.get() - 1)
+                    render_page()
+            
+            def next_page():
+                if current_page.get() < total_pages:
+                    current_page.set(current_page.get() + 1)
+                    render_page()
+            
+            def go_to_page():
+                try:
+                    page = int(page_entry.get())
+                    if 1 <= page <= total_pages:
+                        current_page.set(page)
+                        render_page()
+                except ValueError:
+                    pass
+            
+            def zoom_in():
+                new_zoom = min(zoom_level.get() + 0.2, 3.0)
+                zoom_level.set(new_zoom)
+                render_page()
+            
+            def zoom_out():
+                new_zoom = max(zoom_level.get() - 0.2, 0.4)
+                zoom_level.set(new_zoom)
+                render_page()
+            
+            def zoom_fit():
+                zoom_level.set(1.0)
+                render_page()
+            
+            def on_mouse_wheel(event):
+                """Scroll con rueda del ratón"""
+                if event.state & 0x0004:  # Control presionado = zoom
+                    if event.delta > 0 or event.num == 4:
+                        zoom_in()
+                    else:
+                        zoom_out()
+                else:  # Scroll normal
+                    if event.delta > 0 or event.num == 4:
+                        canvas.yview_scroll(-1, "units")
+                    else:
+                        canvas.yview_scroll(1, "units")
+            
+            # Controles de navegación
+            ttk.Button(control_frame, text="◀ Anterior", command=prev_page).pack(side=tk.LEFT, padx=2)
+            ttk.Button(control_frame, text="Siguiente ▶", command=next_page).pack(side=tk.LEFT, padx=2)
+            
+            page_label = ttk.Label(control_frame, text=f"Página 1 de {total_pages}")
+            page_label.pack(side=tk.LEFT, padx=10)
+            
+            ttk.Label(control_frame, text="Ir a:").pack(side=tk.LEFT, padx=2)
+            page_entry = ttk.Entry(control_frame, width=5)
+            page_entry.pack(side=tk.LEFT, padx=2)
+            page_entry.bind('<Return>', lambda e: go_to_page())
+            
+            ttk.Button(control_frame, text="Ir", command=go_to_page).pack(side=tk.LEFT, padx=2)
+            
+            # Separador
+            ttk.Separator(control_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
+            
+            # Controles de zoom
+            ttk.Button(control_frame, text="🔍−", command=zoom_out, width=3).pack(side=tk.LEFT, padx=2)
+            ttk.Button(control_frame, text="🔍+", command=zoom_in, width=3).pack(side=tk.LEFT, padx=2)
+            ttk.Button(control_frame, text="Ajustar", command=zoom_fit).pack(side=tk.LEFT, padx=2)
+            
+            zoom_label = ttk.Label(control_frame, text="Zoom: 100%")
+            zoom_label.pack(side=tk.LEFT, padx=5)
+            
+            ttk.Button(control_frame, text="Cerrar", command=viewer.destroy).pack(side=tk.RIGHT, padx=5)
+            
+            # Bindings
+            canvas.bind("<MouseWheel>", on_mouse_wheel)  # Windows/MacOS
+            canvas.bind("<Button-4>", on_mouse_wheel)    # Linux scroll up
+            canvas.bind("<Button-5>", on_mouse_wheel)    # Linux scroll down
+            
+            viewer.bind('<Left>', lambda e: prev_page())
+            viewer.bind('<Right>', lambda e: next_page())
+            viewer.bind('<plus>', lambda e: zoom_in())
+            viewer.bind('<minus>', lambda e: zoom_out())
+            viewer.bind('<Control-plus>', lambda e: zoom_in())
+            viewer.bind('<Control-minus>', lambda e: zoom_out())
+            viewer.bind('<Control-0>', lambda e: zoom_fit())
+            
+            # Renderizar primera página
+            render_page()
+            
+            self.info_label.config(text=f"📄 Visualizando PDF: {os.path.basename(pdf_path)}")
+            
+        except ImportError:
+            viewer.destroy()
+        except Exception as e:
+            viewer.destroy()
+            messagebox.showerror("Error", f"Error al cargar el PDF: {str(e)}")
+
     def go_back(self):
         """
         Navigate to the parent directory
