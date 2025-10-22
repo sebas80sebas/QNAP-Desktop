@@ -277,15 +277,15 @@ class VideoPlayerApp:
                 ext = os.path.splitext(video)[1].upper()[1:]  # Get extension without dot
                 self.tree.insert('', tk.END, text=f"🎬 {video}", values=(f'Video {ext}', size), tags=('video',))
             
-            # Insertar documentos
+            # Insert documents (with document icon emoji)
             for doc in documents:
                 full_path = os.path.join(path, doc)
                 size = self.get_file_size(full_path)
                 ext = os.path.splitext(doc)[1].upper()[1:]
-                self.tree.insert('', tk.END, text=f"📄 {doc}", values=(f'Documento {ext}', size), tags=('document',))
+                self.tree.insert('', tk.END, text=f"📄 {doc}", values=(f'Document {ext}', size), tags=('document',))
 
             # Update status label with count of items
-            self.info_label.config(text=f"📁 {len(folders)} folders | 🎬 {len(videos)} videos | 📄 {len(documents)} documentos")
+            self.info_label.config(text=f"📁 {len(folders)} folders | 🎬 {len(videos)} videos | 📄 {len(documents)} documents")
 
         except PermissionError:
             messagebox.showerror("Error", "You don't have permission to access this folder")
@@ -340,19 +340,19 @@ class VideoPlayerApp:
             self.load_directory(full_path)
         elif 'Video' in tipo:
             self.play_video(full_path)
-        elif 'Documento' in tipo:
+        elif 'Document' in tipo:
             self.open_document(full_path)
     
     def open_document(self, doc_path):
-        """Abre un documento con visor integrado o externo"""
+        """Opens a document with integrated or external viewer"""
         ext = os.path.splitext(doc_path)[1].lower()
         
         if ext == '.pdf':
-            # Para PDF, usar visor del navegador como fallback integrado
+            # For PDF files, use the integrated viewer
             self.open_pdf_viewer(doc_path)
         else:
-            # Otros documentos, abrir con aplicación externa
-            self.open_external(doc_path, "documento")
+            # For other document types, open with external application
+            self.open_external(doc_path, "document")
 
     def play_video(self, video_path):
         """
@@ -397,80 +397,86 @@ class VideoPlayerApp:
             messagebox.showerror("Error", f"Error playing video: {str(e)}")
     
     def open_pdf_viewer(self, pdf_path):
-        """Visor integrado para archivos PDF"""
+        """Integrated viewer for PDF files"""
         viewer = tk.Toplevel(self.root)
         viewer.title(f"📄 {os.path.basename(pdf_path)}")
         viewer.geometry("900x700")
         
         try:
-            import fitz  # PyMuPDF
+            import fitz  # PyMuPDF library for PDF handling
             
-            # Frame para controles
+            # Control frame for navigation buttons and tools
             control_frame = ttk.Frame(viewer)
             control_frame.pack(fill=tk.X, padx=10, pady=5)
             
-            # Variables
+            # State variables
             current_page = tk.IntVar(value=1)
             zoom_level = tk.DoubleVar(value=1.0)
             
-            # Abrir PDF
+            # Open PDF document
             pdf_doc = fitz.open(pdf_path)
             total_pages = pdf_doc.page_count
             
-            # Canvas para mostrar la página
+            # Canvas frame for PDF display
             canvas_frame = ttk.Frame(viewer)
             canvas_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
             
+            # Create scrollable canvas with dark background
             canvas = tk.Canvas(canvas_frame, bg='#2b2b2b')
             scrollbar_y = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL, command=canvas.yview)
             scrollbar_x = ttk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL, command=canvas.xview)
             
+            # Configure scrollbars
             canvas.configure(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
             
+            # Pack scrollbars and canvas
             scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
             scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
             canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             
             def render_page():
-                """Renderiza la página actual con el zoom actual"""
+                """Renders the current page with current zoom level"""
                 page = pdf_doc[current_page.get() - 1]
                 
-                # Aplicar zoom
+                # Apply zoom transformation
                 zoom = zoom_level.get()
                 mat = fitz.Matrix(zoom, zoom)
                 pix = page.get_pixmap(matrix=mat)
                 
-                # Convertir a formato PIL
+                # Convert to PIL Image format
                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                 
-                # Convertir a PhotoImage
+                # Convert to Tkinter PhotoImage
                 photo = ImageTk.PhotoImage(img)
                 
-                # Limpiar canvas
+                # Clear previous content
                 canvas.delete("all")
                 
-                # Mostrar imagen
+                # Display new image
                 canvas.create_image(0, 0, anchor=tk.NW, image=photo)
-                canvas.image = photo  # Mantener referencia
+                canvas.image = photo  # Keep reference to prevent garbage collection
                 
-                # Configurar región de scroll
+                # Update scroll region
                 canvas.configure(scrollregion=canvas.bbox("all"))
                 
-                # Actualizar etiqueta
-                page_label.config(text=f"Página {current_page.get()} de {total_pages}")
+                # Update status labels
+                page_label.config(text=f"Page {current_page.get()} of {total_pages}")
                 zoom_label.config(text=f"Zoom: {int(zoom * 100)}%")
             
             def prev_page():
+                """Navigate to previous page if available"""
                 if current_page.get() > 1:
                     current_page.set(current_page.get() - 1)
                     render_page()
             
             def next_page():
+                """Navigate to next page if available"""
                 if current_page.get() < total_pages:
                     current_page.set(current_page.get() + 1)
                     render_page()
             
             def go_to_page():
+                """Jump to specific page number"""
                 try:
                     page = int(page_entry.get())
                     if 1 <= page <= total_pages:
@@ -480,64 +486,72 @@ class VideoPlayerApp:
                     pass
             
             def zoom_in():
+                """Increase zoom level up to 300%"""
                 new_zoom = min(zoom_level.get() + 0.2, 3.0)
                 zoom_level.set(new_zoom)
                 render_page()
             
             def zoom_out():
+                """Decrease zoom level down to 40%"""
                 new_zoom = max(zoom_level.get() - 0.2, 0.4)
                 zoom_level.set(new_zoom)
                 render_page()
             
             def zoom_fit():
+                """Reset zoom to 100%"""
                 zoom_level.set(1.0)
                 render_page()
             
             def on_mouse_wheel(event):
-                """Scroll con rueda del ratón"""
-                if event.state & 0x0004:  # Control presionado = zoom
+                """Handle mouse wheel events for scrolling and zooming
+                Ctrl + wheel = zoom
+                Wheel only = vertical scroll
+                """
+                if event.state & 0x0004:  # Ctrl key pressed
                     if event.delta > 0 or event.num == 4:
                         zoom_in()
                     else:
                         zoom_out()
-                else:  # Scroll normal
+                else:  # Normal scroll
                     if event.delta > 0 or event.num == 4:
                         canvas.yview_scroll(-1, "units")
                     else:
                         canvas.yview_scroll(1, "units")
             
-            # Controles de navegación
-            ttk.Button(control_frame, text="◀ Anterior", command=prev_page).pack(side=tk.LEFT, padx=2)
-            ttk.Button(control_frame, text="Siguiente ▶", command=next_page).pack(side=tk.LEFT, padx=2)
+            # Navigation controls
+            ttk.Button(control_frame, text="◀ Previous", command=prev_page).pack(side=tk.LEFT, padx=2)
+            ttk.Button(control_frame, text="Next ▶", command=next_page).pack(side=tk.LEFT, padx=2)
             
-            page_label = ttk.Label(control_frame, text=f"Página 1 de {total_pages}")
+            # Page indicator and navigation
+            page_label = ttk.Label(control_frame, text=f"Page 1 of {total_pages}")
             page_label.pack(side=tk.LEFT, padx=10)
             
-            ttk.Label(control_frame, text="Ir a:").pack(side=tk.LEFT, padx=2)
+            ttk.Label(control_frame, text="Go to:").pack(side=tk.LEFT, padx=2)
             page_entry = ttk.Entry(control_frame, width=5)
             page_entry.pack(side=tk.LEFT, padx=2)
             page_entry.bind('<Return>', lambda e: go_to_page())
             
-            ttk.Button(control_frame, text="Ir", command=go_to_page).pack(side=tk.LEFT, padx=2)
+            ttk.Button(control_frame, text="Go", command=go_to_page).pack(side=tk.LEFT, padx=2)
             
-            # Separador
+            # Visual separator
             ttk.Separator(control_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
             
-            # Controles de zoom
+            # Zoom controls
             ttk.Button(control_frame, text="🔍−", command=zoom_out, width=3).pack(side=tk.LEFT, padx=2)
             ttk.Button(control_frame, text="🔍+", command=zoom_in, width=3).pack(side=tk.LEFT, padx=2)
-            ttk.Button(control_frame, text="Ajustar", command=zoom_fit).pack(side=tk.LEFT, padx=2)
+            ttk.Button(control_frame, text="Fit", command=zoom_fit).pack(side=tk.LEFT, padx=2)
             
             zoom_label = ttk.Label(control_frame, text="Zoom: 100%")
             zoom_label.pack(side=tk.LEFT, padx=5)
             
-            ttk.Button(control_frame, text="Cerrar", command=viewer.destroy).pack(side=tk.RIGHT, padx=5)
+            ttk.Button(control_frame, text="Close", command=viewer.destroy).pack(side=tk.RIGHT, padx=5)
             
-            # Bindings
+            # Key and mouse bindings
             canvas.bind("<MouseWheel>", on_mouse_wheel)  # Windows/MacOS
             canvas.bind("<Button-4>", on_mouse_wheel)    # Linux scroll up
             canvas.bind("<Button-5>", on_mouse_wheel)    # Linux scroll down
             
+            # Keyboard shortcuts
             viewer.bind('<Left>', lambda e: prev_page())
             viewer.bind('<Right>', lambda e: next_page())
             viewer.bind('<plus>', lambda e: zoom_in())
@@ -546,17 +560,20 @@ class VideoPlayerApp:
             viewer.bind('<Control-minus>', lambda e: zoom_out())
             viewer.bind('<Control-0>', lambda e: zoom_fit())
             
-            # Renderizar primera página
+            # Display first page
             render_page()
             
-            self.info_label.config(text=f"📄 Visualizando PDF: {os.path.basename(pdf_path)}")
+            # Update status
+            self.info_label.config(text=f"📄 Viewing PDF: {os.path.basename(pdf_path)}")
             
         except ImportError:
+            # PyMuPDF not installed
             viewer.destroy()
         except Exception as e:
+            # Handle other errors
             viewer.destroy()
-            messagebox.showerror("Error", f"Error al cargar el PDF: {str(e)}")
-
+            messagebox.showerror("Error", f"Error loading PDF: {str(e)}")
+    
     def go_back(self):
         """
         Navigate to the parent directory
