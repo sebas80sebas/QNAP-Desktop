@@ -31,7 +31,7 @@ class VideoPlayerApp:
         
         # Supported video file extensions
         self.video_extensions = {'.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v'}
-        self.document_extensions = {'.pdf'}
+        self.document_extensions = {'.pdf', '.txt'}
 
         # Setup the user interface
         self.setup_ui()
@@ -350,6 +350,9 @@ class VideoPlayerApp:
         if ext == '.pdf':
             # For PDF files, use the integrated viewer
             self.open_pdf_viewer(doc_path)
+        elif ext == '.txt':
+            # For TXT files, use the integrated text viewer
+            self.open_txt_viewer(doc_path)
         else:
             # For other document types, open with external application
             self.open_external(doc_path, "document")
@@ -574,6 +577,161 @@ class VideoPlayerApp:
             viewer.destroy()
             messagebox.showerror("Error", f"Error loading PDF: {str(e)}")
     
+    def open_txt_viewer(self, txt_path):
+        """Integrated viewer for TXT files"""
+        viewer = tk.Toplevel(self.root)
+        viewer.title(f"📝 {os.path.basename(txt_path)}")
+        viewer.geometry("900x700")
+        
+        try:
+            # Control frame for tools
+            control_frame = ttk.Frame(viewer)
+            control_frame.pack(fill=tk.X, padx=10, pady=5)
+            
+            # Font size control
+            font_size = tk.IntVar(value=11)
+            
+            # Text widget frame
+            text_frame = ttk.Frame(viewer)
+            text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+            
+            # Scrollbars
+            scrollbar_y = ttk.Scrollbar(text_frame)
+            scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
+            
+            scrollbar_x = ttk.Scrollbar(text_frame, orient=tk.HORIZONTAL)
+            scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
+            
+            # Text widget with styling
+            text_widget = tk.Text(
+                text_frame,
+                wrap=tk.WORD,
+                yscrollcommand=scrollbar_y.set,
+                xscrollcommand=scrollbar_x.set,
+                font=('Courier New', font_size.get()),
+                bg='#f5f5f5',
+                fg='#333333',
+                padx=15,
+                pady=15,
+                relief=tk.FLAT,
+                borderwidth=0
+            )
+            text_widget.pack(fill=tk.BOTH, expand=True)
+            
+            scrollbar_y.config(command=text_widget.yview)
+            scrollbar_x.config(command=text_widget.yview)
+            
+            # Read and display file content
+            try:
+                with open(txt_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                text_widget.insert('1.0', content)
+            except UnicodeDecodeError:
+                # Try with different encoding if UTF-8 fails
+                try:
+                    with open(txt_path, 'r', encoding='latin-1') as f:
+                        content = f.read()
+                    text_widget.insert('1.0', content)
+                except Exception as e:
+                    text_widget.insert('1.0', f"Error loading file: {str(e)}")
+            
+            # Make read-only
+            text_widget.config(state=tk.DISABLED)
+            
+            def update_font_size():
+                """Update text widget font size"""
+                text_widget.config(font=('Courier New', font_size.get()))
+            
+            def increase_font():
+                """Increase font size"""
+                if font_size.get() < 24:
+                    font_size.set(font_size.get() + 1)
+                    update_font_size()
+                    size_label.config(text=f"Size: {font_size.get()}")
+            
+            def decrease_font():
+                """Decrease font size"""
+                if font_size.get() > 8:
+                    font_size.set(font_size.get() - 1)
+                    update_font_size()
+                    size_label.config(text=f"Size: {font_size.get()}")
+            
+            def toggle_wrap():
+                """Toggle word wrap"""
+                current = text_widget.cget('wrap')
+                if current == tk.WORD:
+                    text_widget.config(wrap=tk.NONE)
+                    wrap_btn.config(text="Wrap: OFF")
+                else:
+                    text_widget.config(wrap=tk.WORD)
+                    wrap_btn.config(text="Wrap: ON")
+            
+            def search_text():
+                """Simple search functionality"""
+                search_window = tk.Toplevel(viewer)
+                search_window.title("Search")
+                search_window.geometry("300x100")
+                
+                ttk.Label(search_window, text="Find:").pack(padx=10, pady=5)
+                search_entry = ttk.Entry(search_window, width=30)
+                search_entry.pack(padx=10, pady=5)
+                search_entry.focus()
+                
+                def do_search():
+                    # Remove previous highlights
+                    text_widget.tag_remove('search', '1.0', tk.END)
+                    
+                    search_term = search_entry.get()
+                    if search_term:
+                        idx = '1.0'
+                        while True:
+                            idx = text_widget.search(search_term, idx, nocase=True, stopindex=tk.END)
+                            if not idx:
+                                break
+                            lastidx = f"{idx}+{len(search_term)}c"
+                            text_widget.tag_add('search', idx, lastidx)
+                            idx = lastidx
+                        
+                        # Configure highlight tag
+                        text_widget.tag_config('search', background='yellow', foreground='black')
+                
+                search_entry.bind('<Return>', lambda e: do_search())
+                ttk.Button(search_window, text="Search", command=do_search).pack(pady=5)
+            
+            # Control buttons
+            ttk.Label(control_frame, text="Font:").pack(side=tk.LEFT, padx=5)
+            ttk.Button(control_frame, text="A−", command=decrease_font, width=3).pack(side=tk.LEFT, padx=2)
+            ttk.Button(control_frame, text="A+", command=increase_font, width=3).pack(side=tk.LEFT, padx=2)
+            
+            size_label = ttk.Label(control_frame, text=f"Size: {font_size.get()}")
+            size_label.pack(side=tk.LEFT, padx=5)
+            
+            ttk.Separator(control_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
+            
+            wrap_btn = ttk.Button(control_frame, text="Wrap: ON", command=toggle_wrap)
+            wrap_btn.pack(side=tk.LEFT, padx=2)
+            
+            ttk.Button(control_frame, text="🔍 Search", command=search_text).pack(side=tk.LEFT, padx=2)
+            
+            # File info
+            file_size = self.get_file_size(txt_path)
+            info_label = ttk.Label(control_frame, text=f"Size: {file_size}")
+            info_label.pack(side=tk.LEFT, padx=10)
+            
+            ttk.Button(control_frame, text="Close", command=viewer.destroy).pack(side=tk.RIGHT, padx=5)
+            
+            # Keyboard shortcuts
+            viewer.bind('<Control-f>', lambda e: search_text())
+            viewer.bind('<Control-plus>', lambda e: increase_font())
+            viewer.bind('<Control-minus>', lambda e: decrease_font())
+            
+            # Update status
+            self.info_label.config(text=f"📝 Viewing TXT: {os.path.basename(txt_path)}")
+            
+        except Exception as e:
+            viewer.destroy()
+            messagebox.showerror("Error", f"Error loading text file: {str(e)}")
+
     def go_back(self):
         """
         Navigate to the parent directory
