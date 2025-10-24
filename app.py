@@ -248,6 +248,7 @@ class VideoPlayerApp:
             folders = []
             videos = []
             documents = []
+            images = []
 
             # Separate folders and video files
             for item in items:
@@ -284,8 +285,15 @@ class VideoPlayerApp:
                 ext = os.path.splitext(doc)[1].upper()[1:]
                 self.tree.insert('', tk.END, text=f"📄 {doc}", values=(f'Document {ext}', size), tags=('document',))
 
+            # Insert images (with image icon emoji)
+            for img in images:
+                full_path = os.path.join(path, img)
+                size = self.get_file_size(full_path)
+                ext = os.path.splitext(img)[1].upper()[1:]
+                self.tree.insert('', tk.END, text=f"🖼️ {img}", values=(f'Image {ext}', size), tags=('image',))
+
             # Update status label with count of items
-            self.info_label.config(text=f"📁 {len(folders)} folders | 🎬 {len(videos)} videos | 📄 {len(documents)} documents")
+            self.info_label.config(text=f"📁 {len(folders)} folders | 🎬 {len(videos)} videos | 📄 {len(documents)} documents | 🖼️ {len(images)} images")
 
         except PermissionError:
             messagebox.showerror("Error", "You don't have permission to access this folder")
@@ -330,7 +338,7 @@ class VideoPlayerApp:
         
         # Get item data
         item = self.tree.item(selection[0])
-        name = item['text'].replace('📁 ', '').replace('🎬 ', '').replace('📄 ', '')
+        name = item['text'].replace('📁 ', '').replace('🎬 ', '').replace('📄 ', '').replace('🖼️ ', '')
         tipo = item['values'][0]
         
         full_path = os.path.join(self.current_path, name)
@@ -342,6 +350,8 @@ class VideoPlayerApp:
             self.play_video(full_path)
         elif 'Document' in tipo:
             self.open_document(full_path)
+        elif 'Image' in tipo:
+            self.open_image_viewer(full_path)
     
     def open_document(self, doc_path):
         """Opens a document with integrated or external viewer"""
@@ -731,6 +741,195 @@ class VideoPlayerApp:
         except Exception as e:
             viewer.destroy()
             messagebox.showerror("Error", f"Error loading text file: {str(e)}")
+
+    def open_image_viewer(self, image_path):
+        """Integrated viewer for image files"""
+        viewer = tk.Toplevel(self.root)
+        viewer.title(f"🖼️ {os.path.basename(image_path)}")
+        viewer.geometry("900x700")
+        
+        try:
+            # Control frame for tools
+            control_frame = ttk.Frame(viewer)
+            control_frame.pack(fill=tk.X, padx=10, pady=5)
+            
+            # Variables for zoom and rotation
+            zoom_level = tk.DoubleVar(value=1.0)
+            rotation = tk.IntVar(value=0)
+            
+            # Load original image
+            original_image = Image.open(image_path)
+            
+            # Canvas frame to display the image
+            canvas_frame = ttk.Frame(viewer)
+            canvas_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+            
+            # Create canvas with dark background
+            canvas = tk.Canvas(canvas_frame, bg='#2b2b2b')
+            scrollbar_y = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL, command=canvas.yview)
+            scrollbar_x = ttk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL, command=canvas.xview)
+            
+            # Configure scrollbars
+            canvas.configure(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
+            
+            scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
+            scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
+            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            
+            def render_image():
+                """Renders the image with current zoom and rotation"""
+                # Apply rotation
+                img = original_image.rotate(rotation.get(), expand=True)
+                
+                # Apply zoom
+                zoom = zoom_level.get()
+                new_width = int(img.width * zoom)
+                new_height = int(img.height * zoom)
+                
+                # Ensure dimensions are positive
+                if new_width > 0 and new_height > 0:
+                    img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                
+                # Convert to PhotoImage
+                photo = ImageTk.PhotoImage(img)
+                
+                # Clear canvas
+                canvas.delete("all")
+                
+                # Center image on canvas
+                canvas_width = canvas.winfo_width()
+                canvas_height = canvas.winfo_height()
+                
+                x = max(0, (canvas_width - new_width) // 2)
+                y = max(0, (canvas_height - new_height) // 2)
+                
+                # Display image
+                canvas.create_image(x, y, anchor=tk.NW, image=photo)
+                canvas.image = photo  # Keep reference to prevent garbage collection
+                
+                # Configure scroll region
+                canvas.configure(scrollregion=(0, 0, max(canvas_width, new_width), max(canvas_height, new_height)))
+                
+                # Update labels with current values
+                zoom_label.config(text=f"Zoom: {int(zoom * 100)}%")
+                rotation_label.config(text=f"Rotation: {rotation.get()}°")
+                size_label.config(text=f"Size: {original_image.width}x{original_image.height}px")
+            
+            def zoom_in():
+                """Increase zoom level"""
+                new_zoom = min(zoom_level.get() + 0.2, 5.0)  # Max 500%
+                zoom_level.set(new_zoom)
+                render_image()
+            
+            def zoom_out():
+                """Decrease zoom level"""
+                new_zoom = max(zoom_level.get() - 0.2, 0.1)  # Min 10%
+                zoom_level.set(new_zoom)
+                render_image()
+            
+            def zoom_fit():
+                """Fit image to canvas size"""
+                canvas.update_idletasks()
+                canvas_width = canvas.winfo_width()
+                canvas_height = canvas.winfo_height()
+                
+                # Calculate zoom to fit
+                zoom_w = canvas_width / original_image.width
+                zoom_h = canvas_height / original_image.height
+                new_zoom = min(zoom_w, zoom_h, 1.0) * 0.9  # 90% to leave margin
+                
+                zoom_level.set(new_zoom)
+                render_image()
+            
+            def zoom_actual():
+                """Reset to 100% zoom (actual size)"""
+                zoom_level.set(1.0)
+                render_image()
+            
+            def rotate_left():
+                """Rotate image 90° counter-clockwise"""
+                new_rotation = (rotation.get() - 90) % 360
+                rotation.set(new_rotation)
+                render_image()
+            
+            def rotate_right():
+                """Rotate image 90° clockwise"""
+                new_rotation = (rotation.get() + 90) % 360
+                rotation.set(new_rotation)
+                render_image()
+            
+            def on_mouse_wheel(event):
+                """Handle mouse wheel events for scrolling and zooming"""
+                if event.state & 0x0004:  # Control key pressed = zoom
+                    if event.delta > 0 or event.num == 4:  # Scroll up
+                        zoom_in()
+                    else:  # Scroll down
+                        zoom_out()
+                else:  # Normal scrolling
+                    if event.delta > 0 or event.num == 4:  # Scroll up
+                        canvas.yview_scroll(-1, "units")
+                    else:  # Scroll down
+                        canvas.yview_scroll(1, "units")
+            
+            # Zoom controls
+            ttk.Label(control_frame, text="Zoom:").pack(side=tk.LEFT, padx=5)
+            ttk.Button(control_frame, text="🔍−", command=zoom_out, width=3).pack(side=tk.LEFT, padx=2)
+            ttk.Button(control_frame, text="🔍+", command=zoom_in, width=3).pack(side=tk.LEFT, padx=2)
+            ttk.Button(control_frame, text="Fit", command=zoom_fit).pack(side=tk.LEFT, padx=2)
+            ttk.Button(control_frame, text="100%", command=zoom_actual).pack(side=tk.LEFT, padx=2)
+            
+            zoom_label = ttk.Label(control_frame, text="Zoom: 100%")
+            zoom_label.pack(side=tk.LEFT, padx=5)
+            
+            # Separator
+            ttk.Separator(control_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
+            
+            # Rotation controls
+            ttk.Label(control_frame, text="Rotate:").pack(side=tk.LEFT, padx=5)
+            ttk.Button(control_frame, text="↶ 90°", command=rotate_left).pack(side=tk.LEFT, padx=2)
+            ttk.Button(control_frame, text="↷ 90°", command=rotate_right).pack(side=tk.LEFT, padx=2)
+            
+            rotation_label = ttk.Label(control_frame, text="Rotation: 0°")
+            rotation_label.pack(side=tk.LEFT, padx=5)
+            
+            # Separator
+            ttk.Separator(control_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
+            
+            # Image information
+            size_label = ttk.Label(control_frame, text=f"Size: {original_image.width}x{original_image.height}px")
+            size_label.pack(side=tk.LEFT, padx=5)
+            
+            file_size = self.get_file_size(image_path)
+            ttk.Label(control_frame, text=f"| {file_size}").pack(side=tk.LEFT, padx=2)
+            
+            # Close button
+            ttk.Button(control_frame, text="Close", command=viewer.destroy).pack(side=tk.RIGHT, padx=5)
+            
+            # Event bindings for mouse wheel
+            canvas.bind("<MouseWheel>", on_mouse_wheel)  # Windows/MacOS
+            canvas.bind("<Button-4>", on_mouse_wheel)    # Linux scroll up
+            canvas.bind("<Button-5>", on_mouse_wheel)    # Linux scroll down
+            
+            # Keyboard shortcuts
+            viewer.bind('<plus>', lambda e: zoom_in())              # + key: zoom in
+            viewer.bind('<minus>', lambda e: zoom_out())            # - key: zoom out
+            viewer.bind('<Control-plus>', lambda e: zoom_in())      # Ctrl++: zoom in
+            viewer.bind('<Control-minus>', lambda e: zoom_out())    # Ctrl+-: zoom out
+            viewer.bind('<Control-0>', lambda e: zoom_actual())     # Ctrl+0: actual size
+            viewer.bind('<f>', lambda e: zoom_fit())                # F: fit to window
+            viewer.bind('<Left>', lambda e: rotate_left())          # Left arrow: rotate left
+            viewer.bind('<Right>', lambda e: rotate_right())        # Right arrow: rotate right
+            
+            # Render initial image after canvas is ready
+            viewer.update_idletasks()
+            zoom_fit()  # Auto-fit on open
+            
+            # Update status label
+            self.info_label.config(text=f"🖼️ Viewing image: {os.path.basename(image_path)}")
+            
+        except Exception as e:
+            viewer.destroy()
+            messagebox.showerror("Error", f"Error loading image: {str(e)}")
 
     def go_back(self):
         """
