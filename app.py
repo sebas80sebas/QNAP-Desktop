@@ -2,10 +2,15 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import os
 import subprocess
-import platform
 from pathlib import Path
 from PIL import Image, ImageTk
 import time
+
+try:
+    import mpv
+    MPV_AVAILABLE = True
+except ImportError:
+    MPV_AVAILABLE = False
 
 class VideoPlayerApp:
     def __init__(self, root):
@@ -32,6 +37,7 @@ class VideoPlayerApp:
         # Supported video file extensions
         self.video_extensions = {'.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v'}
         self.document_extensions = {'.pdf', '.txt'}
+        self.image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.tiff', '.ico'}
 
         # Setup the user interface
         self.setup_ui()
@@ -266,6 +272,8 @@ class VideoPlayerApp:
                         videos.append(item)
                     elif ext in self.document_extensions:
                         documents.append(item)
+                    elif ext in self.image_extensions:
+                        images.append(item)
             
             # Insert folders first (with folder icon emoji)
             for folder in folders:
@@ -369,45 +377,426 @@ class VideoPlayerApp:
 
     def play_video(self, video_path):
         """
-        Play a video using the system's default video player
-        Tries multiple players on Linux for better compatibility
+        Play a video using integrated MPV player with full controls
+        Creates a custom video player window with playback controls, audio/subtitle selection,
+        and keyboard shortcuts for a complete viewing experience
         
         Args:
-            video_path: Full path to the video file
+            video_path: Full path to the video file to play
+        
+        Features:
+            - Play/pause, stop, seek controls
+            - Volume control and mute
+            - Fullscreen support
+            - Audio track selection
+            - Subtitle track selection
+            - Progress bar with time display
+            - Keyboard shortcuts (space, arrows, f, m, etc.)
         """
+        # Check if MPV library is available
+        if not MPV_AVAILABLE:
+            messagebox.showerror(
+                "MPV not available",
+                "To play integrated videos, install:\n\n"
+                "pip install python-mpv\n\n"
+                "And make sure you have libmpv installed:\n"
+                "sudo apt install libmpv-dev mpv"
+            )
+            return
+        
+        # Create the player window
+        player_window = tk.Toplevel(self.root)
+        player_window.title(f"▶️ {os.path.basename(video_path)}")
+        player_window.geometry("1024x700")
+        
+        # Variable to maintain player reference (prevents garbage collection)
+        player_window.player = None
+        
         try:
-            system = platform.system()
+            # Create control panel frame at the top
+            control_frame = ttk.Frame(player_window)
+            control_frame.pack(fill=tk.X, padx=10, pady=5)
             
-            if system == 'Linux':
-                # Try various common Linux video players
-                # MPV is tried first because it's more stable and lightweight
-                players = ['mpv', 'totem', 'gnome-videos', 'xdg-open', '/usr/bin/vlc']
-                for player in players:
-                    try:
-                        # Use DEVNULL to avoid terminal output
-                        subprocess.Popen([player, video_path], 
-                                       stdout=subprocess.DEVNULL, 
-                                       stderr=subprocess.DEVNULL)
-                        self.info_label.config(text=f"▶️ Playing: {os.path.basename(video_path)}")
+            # Initialize control variables
+            is_playing = tk.BooleanVar(value=True)
+            volume_level = tk.IntVar(value=70)
+            is_fullscreen = tk.BooleanVar(value=False)
+            
+            # Create video display frame
+            video_frame = tk.Frame(player_window, bg='black')
+            video_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+            
+            # Wait for frame to be fully rendered before embedding video
+            player_window.update_idletasks()
+            video_frame.update_idletasks()
+            
+            # Get the window ID for MPV embedding
+            wid = str(video_frame.winfo_id())
+            
+            # Create MPV instance with safer configuration
+            player = mpv.MPV(
+                wid=wid,  # Embed in our tkinter frame
+                ytdl=False,  # Disable youtube-dl
+                input_default_bindings=False,  # Disable default key bindings
+                input_vo_keyboard=False,  # Disable video output keyboard input
+                osc=False,  # Disable on-screen controller
+                keep_open=True,  # Keep window open after playback ends
+                vo='x11',  # Force X11 backend for Linux compatibility
+                volume=volume_level.get(),
+                cursor_autohide='no'  # Don't auto-hide cursor
+            )
+            
+            # Save player reference to window object
+            player_window.player = player
+            
+            # Variables for time display and progress
+            duration_var = tk.StringVar(value="00:00:00")
+            position_var = tk.StringVar(value="00:00:00")
+            progress_var = tk.DoubleVar(value=0)
+            
+            # Create progress bar frame
+            progress_frame = ttk.Frame(control_frame)
+            progress_frame.pack(fill=tk.X, pady=5)
+            
+            # Current position label
+            position_label = ttk.Label(progress_frame, textvariable=position_var, width=10)
+            position_label.pack(side=tk.LEFT, padx=5)
+            
+            # Progress slider
+            progress_scale = ttk.Scale(
+                progress_frame,
+                from_=0,
+                to=100,
+                variable=progress_var,
+                orient=tk.HORIZONTAL,
+                command=lambda v: seek_video(float(v))
+            )
+            progress_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+            
+            # Duration label
+            duration_label = ttk.Label(progress_frame, textvariable=duration_var, width=10)
+            duration_label.pack(side=tk.LEFT, padx=5)
+            
+            # Create buttons frame for playback controls
+            buttons_frame = ttk.Frame(control_frame)
+            buttons_frame.pack(fill=tk.X, pady=5)
+            
+            def format_time(seconds):
+                """Convert seconds to HH:MM:SS format"""
+                if seconds is None or seconds < 0:
+                    return "00:00:00"
+                hours = int(seconds // 3600)
+                minutes = int((seconds % 3600) // 60)
+                secs = int(seconds % 60)
+                return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+            
+            def update_progress():
+                """Update progress bar and time labels periodically"""
+                try:
+                    if player.time_pos is not None and player.duration is not None:
+                        position_var.set(format_time(player.time_pos))
+                        duration_var.set(format_time(player.duration))
+                        
+                        if player.duration > 0:
+                            progress = (player.time_pos / player.duration) * 100
+                            progress_var.set(progress)
+                    
+                    # Check if window still exists before scheduling next update
+                    if not player_window.winfo_exists():
                         return
-                    except FileNotFoundError:
-                        # Try next player if this one isn't found
-                        continue
-                # If no player was found, show error
-                messagebox.showerror("Error", "No video player found. Install MPV with: sudo apt install mpv")
+                    
+                    # Schedule next update in 500ms
+                    player_window.after(500, update_progress)
+                except:
+                    pass
             
-            elif system == 'Windows':
-                # Use Windows default file handler
-                os.startfile(video_path)
-                self.info_label.config(text=f"▶️ Playing: {os.path.basename(video_path)}")
+            def seek_video(value):
+                """Seek to a specific position in the video (0-100%)"""
+                try:
+                    if player.duration:
+                        new_position = (float(value) / 100) * player.duration
+                        player.seek(new_position, reference='absolute')
+                except:
+                    pass
             
-            elif system == 'Darwin':  # macOS
-                # Use macOS 'open' command
-                subprocess.Popen(['open', video_path])
-                self.info_label.config(text=f"▶️ Playing: {os.path.basename(video_path)}")
+            def toggle_play_pause():
+                """Toggle between play and pause states"""
+                try:
+                    player.pause = not player.pause
+                    is_playing.set(not player.pause)
+                    play_btn.config(text="⏸️ Pausar" if is_playing.get() else "▶️ Reproducir")
+                except:
+                    pass
+            
+            def stop_video():
+                """Stop playback and close window"""
+                try:
+                    player.stop()
+                    player_window.destroy()
+                except:
+                    pass
+            
+            def seek_backward():
+                """Seek backward 10 seconds"""
+                try:
+                    player.seek(-10, reference='relative')
+                except:
+                    pass
+            
+            def seek_forward():
+                """Seek forward 10 seconds"""
+                try:
+                    player.seek(10, reference='relative')
+                except:
+                    pass
+            
+            def change_volume(value):
+                """Change volume level (0-100)"""
+                try:
+                    player.volume = int(float(value))
+                    volume_label.config(text=f"🔊 {int(float(value))}%")
+                except:
+                    pass
+            
+            def toggle_mute():
+                """Toggle mute on/off"""
+                try:
+                    player.mute = not player.mute
+                    mute_btn.config(text="🔇 Silenciar" if not player.mute else "🔊 Activar")
+                except:
+                    pass
+            
+            def toggle_fullscreen():
+                """Toggle fullscreen mode"""
+                try:
+                    player.fullscreen = not player.fullscreen
+                    is_fullscreen.set(player.fullscreen)
+                    fullscreen_btn.config(text="⛶ Pantalla completa" if not is_fullscreen.get() else "⬜ Ventana")
+                except:
+                    pass
+            
+            def on_close():
+                """Clean up resources when closing the player window"""
+                try:
+                    if player_window.player:
+                        # Stop playback first
+                        player_window.player.command('stop')
+                        # Small pause to allow cleanup
+                        player_window.after(100, lambda: None)
+                        # Terminate player
+                        player_window.player.terminate()
+                        player_window.player = None
+                except Exception as e:
+                    print(f"Error closing player: {e}")
                 
+                try:
+                    player_window.destroy()
+                except Exception as e:
+                    print(f"Error destroying window: {e}")
+            
+            # Create playback control buttons
+            ttk.Button(buttons_frame, text="⏮️ -10s", command=seek_backward, width=8).pack(side=tk.LEFT, padx=2)
+            
+            play_btn = ttk.Button(buttons_frame, text="⏸️ Pausar", command=toggle_play_pause, width=12)
+            play_btn.pack(side=tk.LEFT, padx=2)
+            
+            ttk.Button(buttons_frame, text="⏹️ Detener", command=stop_video, width=10).pack(side=tk.LEFT, padx=2)
+            ttk.Button(buttons_frame, text="⏭️ +10s", command=seek_forward, width=8).pack(side=tk.LEFT, padx=2)
+            
+            # Separator between control sections
+            ttk.Separator(buttons_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
+            
+            # Volume controls
+            ttk.Label(buttons_frame, text="🔊").pack(side=tk.LEFT, padx=5)
+            volume_scale = ttk.Scale(
+                buttons_frame,
+                from_=0,
+                to=100,
+                variable=volume_level,
+                orient=tk.HORIZONTAL,
+                command=change_volume,
+                length=150
+            )
+            volume_scale.pack(side=tk.LEFT, padx=2)
+            
+            volume_label = ttk.Label(buttons_frame, text=f"🔊 {volume_level.get()}%", width=8)
+            volume_label.pack(side=tk.LEFT, padx=2)
+            
+            mute_btn = ttk.Button(buttons_frame, text="🔇 Silenciar", command=toggle_mute, width=12)
+            mute_btn.pack(side=tk.LEFT, padx=2)
+            
+            # Another separator
+            ttk.Separator(buttons_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
+            
+            # Fullscreen button
+            fullscreen_btn = ttk.Button(buttons_frame, text="⛶ Pantalla completa", command=toggle_fullscreen, width=18)
+            fullscreen_btn.pack(side=tk.LEFT, padx=2)
+            
+            # Separator before audio/subtitle controls
+            ttk.Separator(buttons_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
+            
+            # Audio and subtitle track selection controls
+            def show_audio_menu():
+                """Display menu to select audio track"""
+                try:
+                    audio_tracks = player.track_list
+                    audio_list = [t for t in audio_tracks if t.get('type') == 'audio']
+                    
+                    if not audio_list:
+                        messagebox.showinfo("Audio", "No audio tracks available")
+                        return
+                    
+                    # Create selection window
+                    menu_window = tk.Toplevel(player_window)
+                    menu_window.title("Select Audio Track")
+                    menu_window.geometry("400x300")
+                    menu_window.transient(player_window)
+                    
+                    ttk.Label(menu_window, text="Audio Tracks:", font=('Arial', 10, 'bold')).pack(padx=10, pady=10)
+                    
+                    # Listbox to display tracks
+                    listbox = tk.Listbox(menu_window, font=('Arial', 10))
+                    listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+                    
+                    # Populate listbox with audio tracks
+                    for track in audio_list:
+                        track_id = track.get('id', '?')
+                        lang = track.get('lang', 'Unknown')
+                        title = track.get('title', '')
+                        codec = track.get('codec', '')
+                        selected = '►' if track.get('selected') else ' '
+                        
+                        label = f"{selected} ID:{track_id} | {lang}"
+                        if title:
+                            label += f" | {title}"
+                        if codec:
+                            label += f" ({codec})"
+                        
+                        listbox.insert(tk.END, label)
+                    
+                    def select_audio():
+                        """Apply selected audio track"""
+                        selection = listbox.curselection()
+                        if selection:
+                            selected_track = audio_list[selection[0]]
+                            player.aid = selected_track['id']
+                            menu_window.destroy()
+                    
+                    ttk.Button(menu_window, text="Select", command=select_audio).pack(pady=5)
+                    ttk.Button(menu_window, text="Cancel", command=menu_window.destroy).pack(pady=5)
+                    
+                except Exception as e:
+                    messagebox.showerror("Error", f"Error getting audio tracks: {str(e)}")
+            
+            def show_subtitle_menu():
+                """Display menu to select subtitle track"""
+                try:
+                    track_list = player.track_list
+                    sub_list = [t for t in track_list if t.get('type') == 'sub']
+                    
+                    # Create selection window
+                    menu_window = tk.Toplevel(player_window)
+                    menu_window.title("Select Subtitles")
+                    menu_window.geometry("400x300")
+                    menu_window.transient(player_window)
+                    
+                    ttk.Label(menu_window, text="Subtitles:", font=('Arial', 10, 'bold')).pack(padx=10, pady=10)
+                    
+                    # Listbox to display subtitle tracks
+                    listbox = tk.Listbox(menu_window, font=('Arial', 10))
+                    listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+                    
+                    # Option to disable subtitles
+                    current_sid = player.sid
+                    listbox.insert(tk.END, f"{'►' if current_sid == 'no' or current_sid is None else ' '} No subtitles")
+                    
+                    # Populate listbox with subtitle tracks
+                    for track in sub_list:
+                        track_id = track.get('id', '?')
+                        lang = track.get('lang', 'Unknown')
+                        title = track.get('title', '')
+                        codec = track.get('codec', '')
+                        selected = '►' if track.get('selected') else ' '
+                        
+                        label = f"{selected} ID:{track_id} | {lang}"
+                        if title:
+                            label += f" | {title}"
+                        if codec:
+                            label += f" ({codec})"
+                        
+                        listbox.insert(tk.END, label)
+                    
+                    def select_subtitle():
+                        """Apply selected subtitle track"""
+                        selection = listbox.curselection()
+                        if selection:
+                            idx = selection[0]
+                            if idx == 0:
+                                # Disable subtitles
+                                player.sid = 'no'
+                            else:
+                                selected_track = sub_list[idx - 1]
+                                player.sid = selected_track['id']
+                            menu_window.destroy()
+                    
+                    ttk.Button(menu_window, text="Select", command=select_subtitle).pack(pady=5)
+                    ttk.Button(menu_window, text="Cancel", command=menu_window.destroy).pack(pady=5)
+                    
+                except Exception as e:
+                    messagebox.showerror("Error", f"Error getting subtitles: {str(e)}")
+            
+            # Audio and subtitle selection buttons
+            ttk.Button(buttons_frame, text="🎵 Audio", command=show_audio_menu, width=10).pack(side=tk.LEFT, padx=2)
+            ttk.Button(buttons_frame, text="💬 Subs", command=show_subtitle_menu, width=10).pack(side=tk.LEFT, padx=2)
+            
+            # Info frame at the bottom with file info and close button
+            info_frame = ttk.Frame(control_frame)
+            info_frame.pack(fill=tk.X, pady=5)
+            
+            file_size = self.get_file_size(video_path)
+            ttk.Label(info_frame, text=f"📁 {os.path.basename(video_path)} | {file_size}").pack(side=tk.LEFT, padx=5)
+            
+            ttk.Button(info_frame, text="❌ Close", command=on_close).pack(side=tk.RIGHT, padx=5)
+            
+            # Keyboard shortcuts
+            player_window.bind('<space>', lambda e: toggle_play_pause())
+            player_window.bind('<Left>', lambda e: seek_backward())
+            player_window.bind('<Right>', lambda e: seek_forward())
+            player_window.bind('<Up>', lambda e: change_volume(min(100, volume_level.get() + 5)))
+            player_window.bind('<Down>', lambda e: change_volume(max(0, volume_level.get() - 5)))
+            player_window.bind('<f>', lambda e: toggle_fullscreen())
+            player_window.bind('<F11>', lambda e: toggle_fullscreen())
+            player_window.bind('<m>', lambda e: toggle_mute())
+            player_window.bind('<Escape>', lambda e: on_close() if not is_fullscreen.get() else toggle_fullscreen())
+            
+            # Bind to video frame to capture events when it's focused
+            video_frame.bind('<Button-1>', lambda e: video_frame.focus_set())
+            
+            # Double-click for fullscreen toggle
+            video_frame.bind('<Double-Button-1>', lambda e: toggle_fullscreen())
+            
+            # Set window close protocol
+            player_window.protocol("WM_DELETE_WINDOW", on_close)
+            
+            def load_video():
+                """Load and start playing the video after UI is ready"""
+                try:
+                    player.play(video_path)
+                    # Wait for playback to start, then begin progress updates
+                    player_window.after(500, update_progress)
+                except Exception as e:
+                    messagebox.showerror("Error", f"Error loading video: {str(e)}")
+                    on_close()
+            
+            # Load video after a small delay to ensure everything is rendered
+            player_window.after(200, load_video)
+            
+            # Update main window info label
+            self.info_label.config(text=f"▶️ Playing: {os.path.basename(video_path)}")
+            
         except Exception as e:
-            messagebox.showerror("Error", f"Error playing video: {str(e)}")
+            player_window.destroy()
+            messagebox.showerror("Error", f"Error playing video: {str(e)}\n\nMake sure you have installed:\npip install python-mpv\nsudo apt install libmpv-dev mpv")
     
     def open_pdf_viewer(self, pdf_path):
         """Integrated viewer for PDF files"""
