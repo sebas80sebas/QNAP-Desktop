@@ -1,4 +1,4 @@
-# 🖥️ QNAP Desktop
+# 🖥️ QNAP File Desk
 
 > A powerful desktop application for managing and interacting with your QNAP server
 
